@@ -37,7 +37,7 @@ func init() {
 	rootCmd.Flags().DurationVar(&dockerContainerExpiry, "docker-container-expiry", month, "duration for exited Docker containers until they become stale")
 	rootCmd.Flags().DurationVar(&dockerImageExpiry, "docker-image-expiry", month, "duration for Docker images until they become stale")
 
-	rootCmd.Flags().StringVar(&transmissiontHost, "transmission-host", "", "host for Transmission server")
+	rootCmd.Flags().StringVar(&transmissionHost, "transmission-host", "", "host for Transmission server")
 	rootCmd.Flags().StringVar(&transmissionUser, "transmission-user", "", "username for Transmission server")
 	rootCmd.Flags().StringVar(&transmissionPassword, "transmission-password", "", "password for Transmission server")
 	rootCmd.Flags().DurationVar(&transmissionTorrentExpiry, "transmission-torrent-expiry", month, "duration for finished Transmission torrents until they become stale")
@@ -76,26 +76,5 @@ func run(cmd *cobra.Command, args []string) {
 		transmissionTorrent,
 	}
 
-	for _, staler := range stalers {
-		log.Printf("staling out %v", staler)
-
-		items, err := staler.List()
-		if err != nil {
-			log.Fatalf("%v", err)
-		}
-
-		for _, item := range items {
-			log.Printf("checking item with id '%v'", item)
-
-			if time.Since(item.Age) > staler.Expiry() {
-				log.Printf("deleting stale item with id '%v'", item)
-
-				if err := staler.Delete(item); err != nil {
-					log.Printf("could not delete item with id '%v': %v", item, err)
-				}
-			}
-		}
-
-		log.Printf("staled out %v", staler)
-	}
+	stale.RemoveStale(stalers)
 }
