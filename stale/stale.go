@@ -30,6 +30,8 @@ func RemoveStale(stalers []Staler) {
 	for _, staler := range stalers {
 		wg.Add(1)
 
+		log.Printf("checking %v", staler)
+
 		go func(staler Staler) {
 			defer wg.Done()
 

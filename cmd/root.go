@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	month = time.Hour * 24 * 7 * 4
+	month = time.Hour * 24 * 30
 )
 
 var (

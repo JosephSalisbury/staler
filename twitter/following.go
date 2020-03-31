@@ -3,10 +3,13 @@ package twitter
 import (
 	"errors"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
-	"github.com/ChimeraCoder/anaconda"
+	"github.com/dghubble/go-twitter/twitter"
+	"github.com/dghubble/oauth1"
+
 	"github.com/JosephSalisbury/staler/stale"
 )
 
@@ -14,7 +17,7 @@ import (
 type Following struct {
 	expiry time.Duration
 
-	client *anaconda.TwitterApi
+	client *twitter.Client
 }
 
 // NewFollowing returns a new Staler for Twitter Followings.
@@ -32,12 +35,10 @@ func NewFollowing(accessToken string, accessTokenSecret string, consumerKey stri
 		return nil, errors.New("twitter consumer secret cannot be empty")
 	}
 
-	client := anaconda.NewTwitterApiWithCredentials(
-		accessToken,
-		accessTokenSecret,
-		consumerKey,
-		consumerSecret,
-	)
+	config := oauth1.NewConfig(consumerKey, consumerSecret)
+	token := oauth1.NewToken(accessToken, accessTokenSecret)
+	httpClient := config.Client(oauth1.NoContext, token)
+	client := twitter.NewClient(httpClient)
 
 	following := &Following{
 		expiry: expiry,
@@ -64,48 +65,46 @@ func (f *Following) List() ([]stale.Item, error) {
 	v := url.Values{}
 	v.Set("count", "200")
 
-	for page := range f.client.GetFriendsListAll(v) {
-		if page.Error != nil {
-			return nil, page.Error
-		}
+	friends, _, err := f.client.Friends.IDs(nil)
+	if err != nil {
+		return nil, err
+	}
 
-		for _, user := range page.Friends {
-			wg.Add(1)
+	for _, userId := range friends.IDs {
+		wg.Add(1)
 
-			go func(user anaconda.User) {
-				defer wg.Done()
+		go func(id int64) {
+			defer wg.Done()
 
-				v := url.Values{}
-				v.Set("user_id", user.IdStr)
-				v.Set("count", "1")
+			timeline, _, err := f.client.Timelines.UserTimeline(&twitter.UserTimelineParams{
+				UserID: userId,
+				Count:  1,
+			})
+			if err != nil {
+				errChan <- err
+			}
 
-				timeline, err := f.client.GetUserTimeline(v)
-				if err != nil {
-					errChan <- err
-				}
-
-				if len(timeline) == 0 {
-					item := stale.Item{
-						ID:  user.ScreenName,
-						Age: time.Time{},
-					}
-					itemChan <- item
-
-					return
-				}
-
-				latestTweetTime, err := timeline[0].CreatedAtTime()
-				if err != nil {
-					errChan <- err
-				}
-
+			if len(timeline) == 0 {
 				item := stale.Item{
-					ID:  user.ScreenName,
-					Age: latestTweetTime,
+					ID:  strconv.FormatInt(userId, 10),
+					Age: time.Time{},
 				}
 				itemChan <- item
-			}(user)
-		}
+
+				return
+			}
+
+			latestTweetTime, err := timeline[0].CreatedAtTime()
+			if err != nil {
+				errChan <- err
+			}
+
+			item := stale.Item{
+				ID:  strconv.FormatInt(userId, 10),
+				Age: latestTweetTime,
+			}
+			itemChan <- item
+		}(userId)
 	}
 
 	go func() {
@@ -132,9 +131,18 @@ func (f *Following) List() ([]stale.Item, error) {
 
 // Delete deletes the specific Twitter Following.
 func (f *Following) Delete(item stale.Item) error {
-	_, err := f.client.UnfollowUser(item.ID)
+	id, err := strconv.ParseInt(item.ID, 10, 64)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if _, _, err := f.client.Friendships.Destroy(&twitter.FriendshipDestroyParams{
+		UserID: id,
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (f *Following) String() string {
